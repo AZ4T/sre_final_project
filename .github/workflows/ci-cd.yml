@@ -61,9 +61,15 @@ jobs:
                   username: ${{ secrets.EC2_USER }}
                   key: ${{ secrets.SSH_KEY }}
                   port: 22
+
+                  # Note: remove ssh_args if you don’t need them, or leave -o StrictHostKeyChecking=no
                   ssh_args: -o StrictHostKeyChecking=no
+
                   script: |
                       set -e
                       cd ${{ secrets.APP_PATH }}
-                      npm install --production
+
+                      # Call npm by its absolute path:
+                      /usr/bin/npm install --production
+
                       sudo systemctl restart node-app.service
