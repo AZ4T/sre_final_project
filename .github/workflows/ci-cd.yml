@@ -62,14 +62,13 @@ jobs:
                   key: ${{ secrets.SSH_KEY }}
                   port: 22
 
-                  # Note: remove ssh_args if you don’t need them, or leave -o StrictHostKeyChecking=no
-                  ssh_args: -o StrictHostKeyChecking=no
-
                   script: |
                       set -e
                       cd ${{ secrets.APP_PATH }}
 
-                      # Call npm by its absolute path:
-                      /usr/bin/npm install --production
+                      # Prepend /usr/bin so it finds the Node 16 install instead of ~/.nvm:
+                      export PATH="/usr/bin:${PATH}"
 
+                      # Now /usr/bin/npm and /usr/bin/node are used, not the incompatible NVM binary:
+                      npm install --production
                       sudo systemctl restart node-app.service
