@@ -1,32 +1,36 @@
-# .github/workflows/ci-cd.yml
 name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   build-test-deploy:
     runs-on: ubuntu-latest
 
     steps:
+      # 1) Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Node.js
+      # 2) Set up Node.js in the environment
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '14'
 
-      # 1. Install dependencies at the project root
+      # 3) Install dependencies in the `app/` folder
       - name: Install dependencies
+        working-directory: app
         run: npm install
 
-      # 2. Run all Jest tests (app.test.js, plus any others)
+      # 4) Run tests in the `app/` folder
       - name: Run tests
+        working-directory: app
         run: npm test
 
-      # 3. Deploy only if the tests passed
+      # 5) If tests pass, deploy to EC2
       - name: Deploy to EC2
         if: success()
         uses: appleboy/ssh-action@v0.1.7
@@ -37,13 +41,14 @@ jobs:
           port: 22
           script: |
             set -e
+
             # Make sure the target folder exists on EC2
             ssh -o StrictHostKeyChecking=no -i ~/.ssh/temp_key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "mkdir -p ${{ secrets.APP_PATH }}"
 
-            # Rsync everything from the repo root to EC2:/path/to/app
-            rsync -avz -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/temp_key.pem" ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.APP_PATH }}/
+            # Rsync only the contents of `app/` to the server
+            rsync -avz -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/temp_key.pem" ./app/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.APP_PATH }}/
 
-            # On EC2, install production dependencies & restart the service
+            # On EC2: install production deps and restart the Node service
             ssh -o StrictHostKeyChecking=no -i ~/.ssh/temp_key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
               cd ${{ secrets.APP_PATH }}
               npm install --production
