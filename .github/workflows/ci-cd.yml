@@ -1,3 +1,4 @@
+# .github/workflows/ci-cd.yml
 name: CI/CD Pipeline
 
 on:
@@ -10,28 +11,50 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout code
+      # 1) Checkout your code
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2) Setup Node.js
+      # 2) Setup Node.js (for running tests)
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '14'
 
-      # 3) Install dependencies (inside the app/ folder)
+      # 3) Install dependencies inside app/
       - name: Install dependencies
         working-directory: app
         run: npm install
 
-      # 4) Run tests (inside the app/ folder)
+      # 4) Run tests inside app/
       - name: Run tests
         working-directory: app
         run: npm test
 
-      # 5) Deploy to EC2 if tests passed
-      - name: Deploy to EC2
+      # 5) Copy files to EC2 via rsync (only if tests passed)
+      - name: Copy app/ to EC2
+        if: success()
+        run: |
+          set -e
+
+          # 5a) Create ~/.ssh, write the private key from the secret, and lock down permissions:
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          # 5b) Disable StrictHostKeyChecking so that first-time host key prompts do not hang
+          printf "Host *\n    StrictHostKeyChecking no\n" > ~/.ssh/config
+
+          # 5c) Make sure the remote folder exists on EC2 (so rsync destination is valid)
+          ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "mkdir -p ${{ secrets.APP_PATH }}"
+
+          # 5d) Rsync only the contents of ./app/ to the remote EC2:${APP_PATH}/
+          rsync -avz -e "ssh -i ~/.ssh/id_rsa" \
+            ./app/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.APP_PATH }}/
+
+      # 6) Restart the Node service on EC2
+      - name: Restart Node service on EC2
         if: success()
         uses: appleboy/ssh-action@v0.1.7
         with:
@@ -39,18 +62,9 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: 22
-          # (Optional) disable strict host key checking if you see unknown-host warnings:
           ssh_args: -o StrictHostKeyChecking=no
           script: |
             set -e
-
-            # Ensure the remote app folder exists
-            mkdir -p ${{ secrets.APP_PATH }}
-
-            # Sync the entire app directory to EC2
-            rsync -avz ./app/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.APP_PATH }}/
-
-            # On EC2: cd into the app folder, install prod deps, restart service
             cd ${{ secrets.APP_PATH }}
             npm install --production
             sudo systemctl restart node-app.service
