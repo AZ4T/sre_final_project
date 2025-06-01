@@ -1,0 +1,113 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# alert_rules.yml
+#
+# Prometheus alerting rules for URL-SAS application:
+#  • High error rate (5xx)
+#  • High latency (95th-percentile > 500ms)
+#  • Service not responding on port 8080
+#  • Node Exporter down
+#  • Prometheus self-health
+# ─────────────────────────────────────────────────────────────────────────────
+
+groups:
+  - name: url_sas_application_alerts
+    rules:
+
+      # ─── 1. High 5xx error rate over 5m ──────────────────────────────────────
+      - alert: URLSAS_HighErrorRate
+        expr: |
+          sum(
+            rate(http_request_duration_seconds_count{route="/url", status_code=~"5.."}[5m])
+          )
+          /
+          sum(
+            rate(http_request_duration_seconds_count{route="/url"}[5m])
+          )
+          > 0.01
+        # If more than 1% of /url requests in the last 5m returned 5xx, fire alert
+        for: 5m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "High 5xx error rate for URL-SAS ({{ printf "%.2f" (100 * $value) }}% of /url calls are 5xx)"
+          description: |
+            The URL-SAS endpoint `/url` is returning 5xx errors at a rate above 1% (5-minute window).
+            Check application logs, container statuses, and downstream dependencies.
+
+      # ─── 2. High 95th-percentile latency over 5m ──────────────────────────────
+      - alert: URLSAS_HighLatency95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(
+              rate(http_request_duration_seconds_bucket{route="/url"}[5m])
+            ) by (le)
+          )
+          > 0.5
+        # If P95 latency exceeds 0.5 seconds, fire alert
+        for: 2m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "High P95 latency on URL-SAS ({{ printf \"%.3f\" $value }}s)"
+          description: |
+            The 95th-percentile response time for `/url` has exceeded 500 ms over the last 5 minutes.
+            Investigate slow database queries, CPU saturation, or network issues.
+
+      # ─── 3. URL-SAS service unresponsive ─────────────────────────────────────
+      - alert: URLSAS_ServiceDown
+        expr: |
+          up{job="node_exporter"} == 1 and
+          up{job="url_sas"} == 0
+        # If node_exporter is up (host is reachable) but URL-SAS container/service is down, fire alert
+        for: 1m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "URL-SAS container is down"
+          description: |
+            Node Exporter indicates the host is healthy, but the URL-SAS container (port 8080) is unreachable.
+            Possible Docker crash or container exit. Check `docker ps` and service logs on the host.
+
+      # ─── 4. Node Exporter down ────────────────────────────────────────────────
+      - alert: NodeExporterDown
+        expr: up{job="node_exporter"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "Node Exporter is not responding"
+          description: |
+            Prometheus lost the Node Exporter scrape (no data from port 9100). The host might be unreachable,
+            or the Node Exporter process may have stopped.
+
+      # ─── 5. Prometheus server high self-CPU usage ─────────────────────────────
+      - alert: Prometheus_HighSelfCPU
+        expr: rate(process_cpu_seconds_total{job="prometheus"}[2m]) > 0.20
+        for: 5m
+        labels:
+          severity: warning
+          team: devops
+        annotations:
+          summary: "Prometheus is using >20% CPU"
+          description: |
+            The Prometheus server’s own CPU usage has been above 20% for the last 5 minutes.
+            Consider tuning scrape intervals or look into slow queries that might be overloading Prometheus.
+
+      # ─── 6. Prometheus target scrape failure ──────────────────────────────────
+      - alert: Prometheus_TargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: warning
+          team: devops
+        annotations:
+          summary: "Prometheus scraping failure (up=0)"
+          description: |
+            One or more scrape targets (node_exporter, url_sas, etc.) have status up=0 for over 2 minutes.
+            Check connectivity, firewall rules, or service availability.
+
