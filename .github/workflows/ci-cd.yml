@@ -37,18 +37,17 @@ jobs:
               run: |
                   set -e
 
-                  # 5a) Write the SSH key into ~/.ssh/id_rsa
                   mkdir -p ~/.ssh
                   echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
                   chmod 600 ~/.ssh/id_rsa
 
-                  # 5b) Disable host key checking
                   printf "Host *\n  StrictHostKeyChecking no\n" > ~/.ssh/config
 
-                  # 5c) Ensure the remote directory exists
-                  ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "mkdir -p ${{ secrets.APP_PATH }}"
+                  # Make sure the APP_PATH folder exists on EC2:
+                  ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+                    "mkdir -p ${{ secrets.APP_PATH }}"
 
-                  # 5d) Rsync the contents of ./app/ into the EC2 folder
+                  # Rsync code into that folder:
                   rsync -avz -e "ssh -i ~/.ssh/id_rsa" \
                     ./app/ \
                     ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.APP_PATH }}/
