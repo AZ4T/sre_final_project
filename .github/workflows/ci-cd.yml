@@ -68,3 +68,4 @@ jobs:
             cd ${{ secrets.APP_PATH }}
             npm install --production
             sudo systemctl restart node-app.service
+
